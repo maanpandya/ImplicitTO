@@ -121,6 +121,53 @@ def solve_simp(
     return x_phys.reshape((nelx, nely)).astype(np.float32), compliance
 
 
+def compute_compliance(
+    density: np.ndarray,
+    load_dof: int,
+    load_val: float,
+    *,
+    penal: float = 3.0,
+) -> float:
+    """Evaluate true FEA compliance for a fixed density field."""
+
+    if density.ndim != 2:
+        raise ValueError(f"density must have shape (nelx, nely), got {density.shape}")
+
+    nelx, nely = density.shape
+    density_flat = np.asarray(density, dtype=float).reshape(nelx * nely)
+    ndof = 2 * (nelx + 1) * (nely + 1)
+    if load_dof < 0 or load_dof >= ndof:
+        raise ValueError(f"load_dof must be in [0, {ndof})")
+
+    emin = 1e-9
+    emax = 1.0
+    ke = _element_stiffness()
+    edof_mat = _build_element_dofs(nelx, nely)
+    iK = np.kron(edof_mat, np.ones((8, 1))).ravel()
+    jK = np.kron(edof_mat, np.ones((1, 8))).ravel()
+
+    dofs = np.arange(ndof)
+    left_nodes = np.arange(nely + 1)
+    fixed = np.union1d(2 * left_nodes, 2 * left_nodes + 1)
+    if np.isin(load_dof, fixed):
+        raise ValueError("load_dof cannot be on the fixed left wall")
+    free = np.setdiff1d(dofs, fixed)
+
+    force = np.zeros(ndof, dtype=float)
+    force[load_dof] = load_val
+    displacement = np.zeros(ndof, dtype=float)
+
+    stiffness_values = (
+        ke.ravel()[:, np.newaxis] * (emin + density_flat**penal * (emax - emin))
+    ).ravel(order="F")
+    stiffness = coo_matrix((stiffness_values, (iK, jK)), shape=(ndof, ndof)).tocsc()
+    displacement[free] = spsolve(stiffness[free, :][:, free], force[free])
+
+    ue = displacement[edof_mat].reshape(nelx * nely, 8)
+    ce = np.einsum("ij,jk,ik->i", ue, ke, ue)
+    return float(((emin + density_flat**penal * (emax - emin)) * ce).sum())
+
+
 def _build_element_dofs(nelx: int, nely: int) -> np.ndarray:
     elx_idx = np.repeat(np.arange(nelx), nely)
     ely_idx = np.tile(np.arange(nely), nelx)
