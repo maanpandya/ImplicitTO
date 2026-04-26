@@ -11,7 +11,7 @@ from dataset import FourierFeatures
 
 
 class FiLMLayer(nn.Module):
-    """Feature-wise linear modulation conditioned on load parameters."""
+    """Feature-wise linear modulation conditioned on design parameters."""
 
     def __init__(self, cond_dim: int, hidden_dim: int) -> None:
         super().__init__()
@@ -44,13 +44,13 @@ class FiLMLayer(nn.Module):
 
 
 class ConditionalImplicitNetwork(nn.Module):
-    """MLP mapping coordinates and load conditions to material density."""
+    """MLP mapping coordinates and design conditions to material density."""
 
     def __init__(
         self,
-        cond_dim: int = 3,
+        cond_dim: int = 5,
         hidden_dim: int = 256,
-        num_hidden_layers: int = 5,
+        num_hidden_layers: int = 6,
         num_frequencies: int = 64,
         fourier_sigma: float = 10.0,
         activation: str = "silu",
@@ -105,9 +105,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--points-per-sample", type=int, default=1024)
-    parser.add_argument("--cond-dim", type=int, default=3)
+    parser.add_argument("--cond-dim", type=int, default=5)
     parser.add_argument("--hidden-dim", type=int, default=256)
-    parser.add_argument("--num-hidden-layers", type=int, default=5)
+    parser.add_argument("--num-hidden-layers", type=int, default=6)
     parser.add_argument("--num-frequencies", type=int, default=64)
     parser.add_argument("--fourier-sigma", type=float, default=10.0)
     return parser.parse_args()

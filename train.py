@@ -149,7 +149,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--loss", choices=("mse", "bce"), default="mse")
     parser.add_argument("--hidden-dim", type=int, default=256)
-    parser.add_argument("--num-hidden-layers", type=int, default=5)
+    parser.add_argument("--num-hidden-layers", type=int, default=6)
     parser.add_argument("--num-frequencies", type=int, default=64)
     parser.add_argument("--fourier-sigma", type=float, default=10.0)
     parser.add_argument("--activation", choices=("silu", "relu", "gelu"), default="silu")
@@ -314,10 +314,14 @@ def save_validation_figure(
         ax.set_xticks([])
         ax.set_yticks([])
 
-    load_y = float(dataset.conditions[sample_idx, 1])
-    load_value = float(dataset.conditions[sample_idx, 2])
+    volfrac = float(dataset.conditions[sample_idx, 0])
+    load_x = float(dataset.conditions[sample_idx, 1])
+    load_y = float(dataset.conditions[sample_idx, 2])
+    load_fx = float(dataset.conditions[sample_idx, 3])
+    load_fy = float(dataset.conditions[sample_idx, 4])
     fig.suptitle(
-        f"epoch={epoch} sample={sample_idx} y={load_y:.2f} Fy={load_value:.2f}"
+        f"epoch={epoch} sample={sample_idx} vol={volfrac:.2f} "
+        f"loc=({load_x:.2f}, {load_y:.2f}) F=({load_fx:.2f}, {load_fy:.2f})"
     )
     fig.tight_layout()
 

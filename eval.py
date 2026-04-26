@@ -31,7 +31,14 @@ def main() -> None:
 
     rng = np.random.default_rng(args.seed)
     cases = [
-        sample_unseen_case(nelx, nely, rng, args.min_abs_load)
+        sample_unseen_case(
+            nelx,
+            nely,
+            rng,
+            args.min_volfrac,
+            args.max_volfrac,
+            args.min_load_norm,
+        )
         for _ in range(args.num_cases)
     ]
 
@@ -55,7 +62,7 @@ def main() -> None:
         simp_density, simp_compliance = solve_simp(
             nelx,
             nely,
-            args.volfrac,
+            float(condition[0]),
             args.penal,
             args.rmin,
             args.ft,
@@ -78,8 +85,11 @@ def main() -> None:
 
         result = {
             "case": case_idx,
-            "load_y": float(condition[1]),
-            "load_val": float(load_val),
+            "target_volfrac": float(condition[0]),
+            "load_x": float(condition[1]),
+            "load_y": float(condition[2]),
+            "load_fx": float(load_val[0]),
+            "load_fy": float(load_val[1]),
             "nn_time_ms": inference_seconds * 1_000.0,
             "simp_time_s": simp_seconds,
             "speedup": simp_seconds / max(inference_seconds, 1e-12),
@@ -95,7 +105,7 @@ def main() -> None:
         if len(plot_cases) < args.num_plot_cases:
             plot_cases.append((case_idx, simp_density, pred_density, binary_density, result))
 
-    print_report(results, args.volfrac, model_args)
+    print_report(results, model_args)
 
     if args.output_dir:
         output_dir = Path(args.output_dir)
@@ -108,14 +118,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", default="checkpoints/best.pth")
     parser.add_argument("--num-cases", type=int, default=10)
     parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument("--volfrac", type=float, default=0.4)
+    parser.add_argument("--min-volfrac", type=float, default=0.2)
+    parser.add_argument("--max-volfrac", type=float, default=0.6)
     parser.add_argument("--penal", type=float, default=3.0)
     parser.add_argument("--rmin", type=float, default=2.0)
     parser.add_argument("--ft", type=int, choices=(0, 1), default=1)
     parser.add_argument("--simp-max-iter", type=int, default=200)
     parser.add_argument("--simp-change-tol", type=float, default=0.01)
     parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--min-abs-load", type=float, default=0.1)
+    parser.add_argument("--min-load-norm", type=float, default=0.0)
     parser.add_argument("--inference-repeats", type=int, default=20)
     parser.add_argument("--output-dir", default="outputs/eval")
     parser.add_argument("--num-plot-cases", type=int, default=4)
@@ -123,14 +134,18 @@ def parse_args() -> argparse.Namespace:
 
     if args.num_cases <= 0:
         raise ValueError("--num-cases must be positive")
+    if args.min_load_norm < 0.0:
+        raise ValueError("--min-load-norm cannot be negative")
     if args.inference_repeats <= 0:
         raise ValueError("--inference-repeats must be positive")
     if args.num_plot_cases < 0:
         raise ValueError("--num-plot-cases cannot be negative")
     if not 0.0 <= args.threshold <= 1.0:
         raise ValueError("--threshold must be in [0, 1]")
-    if not 0.0 <= args.min_abs_load < 1.0:
-        raise ValueError("--min-abs-load must be in [0, 1)")
+    if not 0.0 < args.min_volfrac <= args.max_volfrac <= 1.0:
+        raise ValueError("--min-volfrac and --max-volfrac must satisfy 0 < min <= max <= 1")
+    if args.min_load_norm > np.sqrt(2.0):
+        raise ValueError("--min-load-norm must be at most sqrt(2)")
 
     return args
 
@@ -142,9 +157,9 @@ def load_model(
     train_args = checkpoint.get("args", {})
 
     model_args = {
-        "cond_dim": int(checkpoint.get("condition_dim", 3)),
+        "cond_dim": int(checkpoint.get("condition_dim", 5)),
         "hidden_dim": int(train_args.get("hidden_dim", 256)),
-        "num_hidden_layers": int(train_args.get("num_hidden_layers", 5)),
+        "num_hidden_layers": int(train_args.get("num_hidden_layers", 6)),
         "num_frequencies": int(train_args.get("num_frequencies", 64)),
         "fourier_sigma": float(train_args.get("fourier_sigma", 10.0)),
         "activation": train_args.get("activation", "silu"),
@@ -163,15 +178,34 @@ def load_model(
 
 
 def sample_unseen_case(
-    nelx: int, nely: int, rng: np.random.Generator, min_abs_load: float
-) -> tuple[np.ndarray, int, float]:
-    y_node = int(rng.integers(0, nely + 1))
-    right_edge_node = nelx * (nely + 1) + y_node
-    load_dof = 2 * right_edge_node + 1
+    nelx: int,
+    nely: int,
+    rng: np.random.Generator,
+    min_volfrac: float,
+    max_volfrac: float,
+    min_load_norm: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    load_x = int(rng.integers(nelx // 2, nelx))
+    load_y = int(rng.integers(0, nely))
+    load_node = load_x * (nely + 1) + load_y
+    load_dof = np.array([2 * load_node, 2 * load_node + 1], dtype=np.int64)
 
-    magnitude = float(rng.uniform(min_abs_load, 1.0))
-    load_val = float(rng.choice([-1.0, 1.0]) * magnitude)
-    condition = np.array([1.0, y_node / nely, load_val], dtype=np.float32)
+    while True:
+        load_val = rng.uniform(-1.0, 1.0, size=2).astype(np.float32)
+        if np.linalg.norm(load_val) >= min_load_norm:
+            break
+
+    volfrac = float(rng.uniform(min_volfrac, max_volfrac))
+    condition = np.array(
+        [
+            volfrac,
+            load_x / max(1, nelx - 1),
+            load_y / max(1, nely - 1),
+            load_val[0],
+            load_val[1],
+        ],
+        dtype=np.float32,
+    )
     return condition, load_dof, load_val
 
 
@@ -231,14 +265,17 @@ def topology_change(density: np.ndarray, binary_density: np.ndarray) -> float:
     return float(np.mean(np.abs(density - binary_density)))
 
 
-def print_report(results: list[dict[str, float]], volfrac: float, model_args: dict) -> None:
+def print_report(results: list[dict[str, float]], model_args: dict) -> None:
     print("\nModel configuration:")
     print(", ".join(f"{key}={value}" for key, value in model_args.items()))
-    print(f"Target volume fraction: {volfrac:.3f}\n")
+    print()
 
     headers = [
         "case",
+        "target",
+        "x",
         "y",
+        "Fx",
         "Fy",
         "NN ms",
         "SIMP s",
@@ -251,13 +288,16 @@ def print_report(results: list[dict[str, float]], volfrac: float, model_args: di
         "J err %",
     ]
     print(
-        f"{headers[0]:>4} {headers[1]:>5} {headers[2]:>7} {headers[3]:>9} "
-        f"{headers[4]:>8} {headers[5]:>9} {headers[6]:>7} {headers[7]:>8} "
-        f"{headers[8]:>7} {headers[9]:>10} {headers[10]:>10} {headers[11]:>9}"
+        f"{headers[0]:>4} {headers[1]:>6} {headers[2]:>5} {headers[3]:>5} "
+        f"{headers[4]:>7} {headers[5]:>7} {headers[6]:>9} {headers[7]:>8} "
+        f"{headers[8]:>9} {headers[9]:>7} {headers[10]:>8} {headers[11]:>7} "
+        f"{headers[12]:>10} {headers[13]:>10} {headers[14]:>9}"
     )
     for row in results:
         print(
-            f"{int(row['case']):4d} {row['load_y']:5.2f} {row['load_val']:7.3f} "
+            f"{int(row['case']):4d} {row['target_volfrac']:6.3f} "
+            f"{row['load_x']:5.2f} {row['load_y']:5.2f} "
+            f"{row['load_fx']:7.3f} {row['load_fy']:7.3f} "
             f"{row['nn_time_ms']:9.3f} {row['simp_time_s']:8.3f} "
             f"{row['speedup']:9.1f} {row['pred_volfrac']:7.3f} "
             f"{row['binary_volfrac']:8.3f} {row['binary_change']:7.3f} "
@@ -270,6 +310,7 @@ def print_report(results: list[dict[str, float]], volfrac: float, model_args: di
         ("nn_time_ms", "NN inference (ms)"),
         ("simp_time_s", "SIMP runtime (s)"),
         ("speedup", "speedup"),
+        ("target_volfrac", "target volume fraction"),
         ("pred_volfrac", "predicted volume fraction"),
         ("binary_volfrac", "binary volume fraction"),
         ("binary_change", "mean binarization change"),
@@ -309,7 +350,9 @@ def save_comparison_plot(
             ax.set_xticks([])
             ax.set_yticks([])
         axes[row_idx][0].set_ylabel(
-            f"case {case_idx}\nFy={result['load_val']:.2f}\ny={result['load_y']:.2f}"
+            f"case {case_idx}\nvol={result['target_volfrac']:.2f} "
+            f"F=({result['load_fx']:.2f},{result['load_fy']:.2f})\n"
+            f"loc=({result['load_x']:.2f},{result['load_y']:.2f})"
         )
 
     fig.tight_layout()
