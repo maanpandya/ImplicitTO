@@ -79,7 +79,7 @@ def main() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", default="data/dataset.npz")
-    parser.add_argument("--num-samples", type=int, default=1000)
+    parser.add_argument("--num-samples", type=int, default=3000)
     parser.add_argument("--nelx", type=int, default=60)
     parser.add_argument("--nely", type=int, default=30)
     parser.add_argument("--min-volfrac", type=float, default=0.2)
