@@ -18,8 +18,8 @@ def solve_simp(
     penal: float,
     rmin: float,
     ft: int,
-    load_dof: int,
-    load_val: float,
+    load_dof: int | np.ndarray,
+    load_val: float | np.ndarray,
     *,
     max_iter: int = 200,
     change_tol: float = 0.01,
@@ -29,7 +29,8 @@ def solve_simp(
 
     The design domain is a rectangular grid of ``nelx`` by ``nely`` elements.
     Nodes on the left wall are fixed in both displacement directions; the load
-    is applied at ``load_dof`` with magnitude ``load_val``.
+    is applied at ``load_dof`` with magnitude ``load_val``. Multiple DOFs may be
+    provided to apply a vector load at one or more nodes.
 
     Returns:
         A tuple ``(x_phys, compliance)`` where ``x_phys`` has shape
@@ -40,8 +41,7 @@ def solve_simp(
         raise ValueError("ft must be 0 (sensitivity filter) or 1 (density filter)")
 
     ndof = 2 * (nelx + 1) * (nely + 1)
-    if load_dof < 0 or load_dof >= ndof:
-        raise ValueError(f"load_dof must be in [0, {ndof})")
+    load_dofs, load_vals = _normalize_loads(load_dof, load_val, ndof)
 
     emin = 1e-9
     emax = 1.0
@@ -61,12 +61,12 @@ def solve_simp(
     dofs = np.arange(ndof)
     left_nodes = np.arange(nely + 1)
     fixed = np.union1d(2 * left_nodes, 2 * left_nodes + 1)
-    if np.isin(load_dof, fixed):
+    if np.any(np.isin(load_dofs, fixed)):
         raise ValueError("load_dof cannot be on the fixed left wall")
     free = np.setdiff1d(dofs, fixed)
 
     force = np.zeros(ndof, dtype=float)
-    force[load_dof] = load_val
+    np.add.at(force, load_dofs, load_vals)
     displacement = np.zeros(ndof, dtype=float)
 
     dv = np.ones(nely * nelx, dtype=float)
@@ -123,8 +123,8 @@ def solve_simp(
 
 def compute_compliance(
     density: np.ndarray,
-    load_dof: int,
-    load_val: float,
+    load_dof: int | np.ndarray,
+    load_val: float | np.ndarray,
     *,
     penal: float = 3.0,
 ) -> float:
@@ -136,8 +136,7 @@ def compute_compliance(
     nelx, nely = density.shape
     density_flat = np.asarray(density, dtype=float).reshape(nelx * nely)
     ndof = 2 * (nelx + 1) * (nely + 1)
-    if load_dof < 0 or load_dof >= ndof:
-        raise ValueError(f"load_dof must be in [0, {ndof})")
+    load_dofs, load_vals = _normalize_loads(load_dof, load_val, ndof)
 
     emin = 1e-9
     emax = 1.0
@@ -149,12 +148,12 @@ def compute_compliance(
     dofs = np.arange(ndof)
     left_nodes = np.arange(nely + 1)
     fixed = np.union1d(2 * left_nodes, 2 * left_nodes + 1)
-    if np.isin(load_dof, fixed):
+    if np.any(np.isin(load_dofs, fixed)):
         raise ValueError("load_dof cannot be on the fixed left wall")
     free = np.setdiff1d(dofs, fixed)
 
     force = np.zeros(ndof, dtype=float)
-    force[load_dof] = load_val
+    np.add.at(force, load_dofs, load_vals)
     displacement = np.zeros(ndof, dtype=float)
 
     stiffness_values = (
@@ -166,6 +165,27 @@ def compute_compliance(
     ue = displacement[edof_mat].reshape(nelx * nely, 8)
     ce = np.einsum("ij,jk,ik->i", ue, ke, ue)
     return float(((emin + density_flat**penal * (emax - emin)) * ce).sum())
+
+
+def _normalize_loads(
+    load_dof: int | np.ndarray,
+    load_val: float | np.ndarray,
+    ndof: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    load_dofs = np.atleast_1d(np.asarray(load_dof, dtype=np.int64))
+    load_vals = np.atleast_1d(np.asarray(load_val, dtype=float))
+
+    if load_dofs.shape != load_vals.shape:
+        raise ValueError(
+            f"load_dof and load_val must have matching shapes, got "
+            f"{load_dofs.shape} and {load_vals.shape}"
+        )
+    if load_dofs.size == 0:
+        raise ValueError("At least one load DOF is required")
+    if np.any(load_dofs < 0) or np.any(load_dofs >= ndof):
+        raise ValueError(f"load_dof entries must be in [0, {ndof})")
+
+    return load_dofs, load_vals
 
 
 def _build_element_dofs(nelx: int, nely: int) -> np.ndarray:

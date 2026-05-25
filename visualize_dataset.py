@@ -122,18 +122,27 @@ def _plot_samples(
 def _draw_load_arrow(
     ax: plt.Axes, condition: np.ndarray, nelx: int, nely: int
 ) -> None:
-    _, load_y, load_magnitude = condition
-    y_coord = float(np.clip(load_y, 0.0, 1.0) * (nely - 1))
-    direction = -1.0 if load_magnitude < 0 else 1.0
-    arrow_length = max(1.0, 0.22 * nely) * direction
+    if len(condition) >= 5:
+        _, load_x, load_y, load_fx, load_fy = condition[:5]
+        x_coord = float(np.clip(load_x, 0.0, 1.0) * (nelx - 1))
+        y_coord = float(np.clip(load_y, 0.0, 1.0) * (nely - 1))
+        force = np.array([load_fx, load_fy], dtype=float)
+        force_norm = max(float(np.linalg.norm(force)), 1e-12)
+        arrow = force / force_norm * max(1.0, 0.18 * min(nelx, nely))
+    else:
+        _, load_y, load_magnitude = condition
+        x_coord = nelx - 1
+        y_coord = float(np.clip(load_y, 0.0, 1.0) * (nely - 1))
+        direction = -1.0 if load_magnitude < 0 else 1.0
+        arrow = np.array([0.0, max(1.0, 0.22 * nely) * direction])
 
     ax.annotate(
         "",
-        xy=(nelx - 1, y_coord + arrow_length),
-        xytext=(nelx - 1, y_coord),
+        xy=(x_coord + arrow[0], y_coord + arrow[1]),
+        xytext=(x_coord, y_coord),
         arrowprops={"arrowstyle": "->", "color": "tab:red", "lw": 2.0},
     )
-    ax.scatter([nelx - 1], [y_coord], s=16, c="tab:red")
+    ax.scatter([x_coord], [y_coord], s=16, c="tab:red")
 
 
 def _sample_title(
@@ -142,8 +151,15 @@ def _sample_title(
     compliances: np.ndarray | None,
     load_dofs: np.ndarray | None,
 ) -> str:
-    _, load_y, load_magnitude = condition
-    lines = [f"idx={sample_idx}  y={load_y:.2f}  Fy={load_magnitude:.2f}"]
+    if len(condition) >= 5:
+        volfrac, load_x, load_y, load_fx, load_fy = condition[:5]
+        lines = [
+            f"idx={sample_idx}  vol={volfrac:.2f}  "
+            f"loc=({load_x:.2f},{load_y:.2f})  F=({load_fx:.2f},{load_fy:.2f})"
+        ]
+    else:
+        _, load_y, load_magnitude = condition
+        lines = [f"idx={sample_idx}  y={load_y:.2f}  Fy={load_magnitude:.2f}"]
 
     details = []
     if compliances is not None:

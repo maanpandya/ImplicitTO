@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from pathlib import Path
 
 import matplotlib
@@ -21,6 +22,8 @@ def main() -> None:
     args = parse_args()
     device = get_device()
     print(f"Using device: {device}")
+    if args.amp and device.type != "cuda":
+        print("--amp requested, but CUDA is not available; using full precision.")
 
     torch.manual_seed(args.seed)
 
@@ -88,6 +91,7 @@ def main() -> None:
             loss_fn,
             device,
             args.max_train_batches,
+            args.amp,
         )
         val_loss = evaluate(
             model,
@@ -95,6 +99,7 @@ def main() -> None:
             loss_fn,
             device,
             args.max_val_batches,
+            args.amp,
         )
         print(
             f"epoch {epoch:04d}/{final_epoch:04d} "
@@ -149,15 +154,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--loss", choices=("mse", "bce"), default="mse")
     parser.add_argument("--hidden-dim", type=int, default=256)
-    parser.add_argument("--num-hidden-layers", type=int, default=5)
+    parser.add_argument("--num-hidden-layers", type=int, default=6)
     parser.add_argument("--num-frequencies", type=int, default=64)
     parser.add_argument("--fourier-sigma", type=float, default=10.0)
     parser.add_argument("--activation", choices=("silu", "relu", "gelu"), default="silu")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--viz-dir", default="outputs/validation")
-    parser.add_argument("--val-every", type=int, default=5)
-    parser.add_argument("--checkpoint-every", type=int, default=10)
+    parser.add_argument("--val-every", type=int, default=25)
+    parser.add_argument("--checkpoint-every", type=int, default=50)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--amp",
+        action="store_true",
+        help="Use CUDA automatic mixed precision when training on an NVIDIA GPU.",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--max-train-batches",
@@ -187,6 +197,8 @@ def parse_args() -> argparse.Namespace:
         raise ValueError("--val-every must be positive")
     if args.checkpoint_every <= 0:
         raise ValueError("--checkpoint-every must be positive")
+    if args.num_workers < 0:
+        raise ValueError("--num-workers cannot be negative")
 
     return args
 
@@ -226,10 +238,13 @@ def train_one_epoch(
     loss_fn: nn.Module,
     device: torch.device,
     max_batches: int | None,
+    amp: bool,
 ) -> float:
     model.train()
     total_loss = 0.0
     total_batches = 0
+    use_amp = amp and device.type == "cuda"
+    scaler = torch.cuda.amp.GradScaler() if use_amp else None
 
     for batch_idx, batch in enumerate(dataloader, start=1):
         coords = batch["coords"].to(device, non_blocking=True)
@@ -237,10 +252,17 @@ def train_one_epoch(
         gt_density = batch["gt_density"].to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
-        pred_density = model(coords, cond)
-        loss = loss_fn(pred_density, gt_density)
-        loss.backward()
-        optimizer.step()
+        amp_context = torch.cuda.amp.autocast() if use_amp else nullcontext()
+        with amp_context:
+            pred_density = model(coords, cond)
+            loss = loss_fn(pred_density, gt_density)
+        if scaler is None:
+            loss.backward()
+            optimizer.step()
+        else:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
         total_loss += loss.item()
         total_batches += 1
@@ -257,18 +279,22 @@ def evaluate(
     loss_fn: nn.Module,
     device: torch.device,
     max_batches: int | None,
+    amp: bool,
 ) -> float:
     model.eval()
     total_loss = 0.0
     total_batches = 0
+    use_amp = amp and device.type == "cuda"
 
     for batch_idx, batch in enumerate(dataloader, start=1):
         coords = batch["coords"].to(device, non_blocking=True)
         cond = batch["cond"].to(device, non_blocking=True)
         gt_density = batch["gt_density"].to(device, non_blocking=True)
 
-        pred_density = model(coords, cond)
-        loss = loss_fn(pred_density, gt_density)
+        amp_context = torch.cuda.amp.autocast() if use_amp else nullcontext()
+        with amp_context:
+            pred_density = model(coords, cond)
+            loss = loss_fn(pred_density, gt_density)
 
         total_loss += loss.item()
         total_batches += 1
@@ -314,10 +340,14 @@ def save_validation_figure(
         ax.set_xticks([])
         ax.set_yticks([])
 
-    load_y = float(dataset.conditions[sample_idx, 1])
-    load_value = float(dataset.conditions[sample_idx, 2])
+    volfrac = float(dataset.conditions[sample_idx, 0])
+    load_x = float(dataset.conditions[sample_idx, 1])
+    load_y = float(dataset.conditions[sample_idx, 2])
+    load_fx = float(dataset.conditions[sample_idx, 3])
+    load_fy = float(dataset.conditions[sample_idx, 4])
     fig.suptitle(
-        f"epoch={epoch} sample={sample_idx} y={load_y:.2f} Fy={load_value:.2f}"
+        f"epoch={epoch} sample={sample_idx} vol={volfrac:.2f} "
+        f"loc=({load_x:.2f}, {load_y:.2f}) F=({load_fx:.2f}, {load_fy:.2f})"
     )
     fig.tight_layout()
 
