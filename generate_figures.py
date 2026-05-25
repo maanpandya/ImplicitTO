@@ -378,6 +378,7 @@ def plot_continuous_morphing(
         condition[0] = volfrac
         density = predict_density(model, condition, nelx, nely, device)
         axes[0, col].imshow(density.T, cmap="gray_r", origin="lower", vmin=0.0, vmax=1.0)
+        draw_load_arrow(axes[0, col], condition, nelx, nely)
         axes[0, col].set_title(rf"$v={volfrac:.2f}$")
         clean_axis(axes[0, col])
 
@@ -389,6 +390,7 @@ def plot_continuous_morphing(
         condition[4] = force_norm * np.sin(angle)
         density = predict_density(model, condition, nelx, nely, device)
         axes[1, col].imshow(density.T, cmap="gray_r", origin="lower", vmin=0.0, vmax=1.0)
+        draw_load_arrow(axes[1, col], condition, nelx, nely)
         axes[1, col].set_title(rf"$\theta={np.degrees(angle):.0f}^\circ$")
         clean_axis(axes[1, col])
 
@@ -493,6 +495,7 @@ def plot_error_histogram(
 
     error_values = np.asarray(errors, dtype=float)
     mean_error = float(error_values.mean())
+    std_error = float(error_values.std())
     x_min, x_max = smart_histogram_limits(error_values)
     x_min = max(0.0, x_min)
     visible_errors = error_values[(error_values >= x_min) & (error_values <= x_max)]
@@ -501,6 +504,18 @@ def plot_error_histogram(
 
     fig, ax = plt.subplots(figsize=(4.7, 3.1))
     ax.hist(visible_errors, bins=bin_edges, color="#4c78a8", edgecolor="white", linewidth=0.6)
+    std_left = max(x_min, mean_error - std_error)
+    std_right = min(x_max, mean_error + std_error)
+    if std_left < std_right:
+        sigma_label = rf"$\pm 1\sigma$ = {std_error:.1f}%"
+        ax.axvline(
+            std_left,
+            color="#f58518",
+            linestyle="-",
+            linewidth=1.4,
+            label=sigma_label,
+        )
+        ax.axvline(std_right, color="#f58518", linestyle="-", linewidth=1.4)
     if x_min <= mean_error <= x_max:
         ax.axvline(
             mean_error,
@@ -509,7 +524,7 @@ def plot_error_histogram(
             linewidth=1.4,
             label=f"mean absolute = {mean_error:.1f}%",
         )
-        ax.legend(frameon=False)
+    ax.legend(frameon=False)
     if clipped_count:
         ax.text(
             0.98,
