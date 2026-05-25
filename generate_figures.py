@@ -136,7 +136,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default="data/dataset.npz")
     parser.add_argument("--checkpoint", default="checkpoints/best.pth")
     parser.add_argument("--output-dir", default=str(DEFAULT_FIGURE_DIR))
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=200)
     parser.add_argument("--val-fraction", type=float, default=0.1)
     parser.add_argument("--qualitative-samples", type=int, default=4)
     parser.add_argument("--speed-cases", type=int, default=50)

@@ -167,17 +167,22 @@ def load_model(
 ) -> tuple[ConditionalImplicitNetwork, dict[str, object]]:
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     train_args = checkpoint.get("args", {})
+    state_dict = checkpoint["model_state_dict"]
+    encoding_type = train_args.get("encoding_type")
+    if encoding_type is None:
+        encoding_type = "gaussian" if "fourier.B" in state_dict else "positional"
 
     model_args = {
         "cond_dim": int(checkpoint.get("condition_dim", 5)),
         "hidden_dim": int(train_args.get("hidden_dim", 256)),
         "num_hidden_layers": int(train_args.get("num_hidden_layers", 6)),
-        "num_frequencies": int(train_args.get("num_frequencies", 64)),
-        "fourier_sigma": float(train_args.get("fourier_sigma", 10.0)),
+        "num_frequencies": int(train_args.get("num_frequencies", 64 if encoding_type == "gaussian" else 5)),
+        "fourier_sigma": float(train_args.get("fourier_sigma", 10.0 if encoding_type == "gaussian" else 1.0)),
         "activation": train_args.get("activation", "silu"),
+        "encoding_type": encoding_type,
     }
     model = ConditionalImplicitNetwork(**model_args).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model.load_state_dict(state_dict)
     model.eval()
 
     metadata = {

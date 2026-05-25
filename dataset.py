@@ -18,9 +18,11 @@ class TopologyDataset(Dataset):
         self,
         dataset_path: str | Path = "data/dataset.npz",
         points_per_sample: int = 1024,
+        jitter_coordinates: bool = False,
     ) -> None:
         self.dataset_path = Path(dataset_path)
         self.points_per_sample = points_per_sample
+        self.jitter_coordinates = jitter_coordinates
 
         if points_per_sample <= 0:
             raise ValueError("points_per_sample must be positive")
@@ -47,6 +49,10 @@ class TopologyDataset(Dataset):
         _, self.nelx, self.nely = self.topologies.shape
         self.coords = _make_normalized_coords(self.nelx, self.nely)
         self.num_grid_points = self.nelx * self.nely
+        self.voxel_size = torch.tensor(
+            [2.0 / self.nelx, 2.0 / self.nely],
+            dtype=torch.float32,
+        )
 
     def __len__(self) -> int:
         return len(self.topologies)
@@ -64,8 +70,13 @@ class TopologyDataset(Dataset):
 
         density = self.topologies[idx].reshape(-1)[point_indices].unsqueeze(-1)
 
+        coords = self.coords[point_indices]
+        if self.jitter_coordinates:
+            jitter = (torch.rand_like(coords) - 0.5) * self.voxel_size
+            coords = (coords + jitter).clamp(-1.0, 1.0)
+
         return {
-            "coords": self.coords[point_indices],
+            "coords": coords,
             "cond": self.conditions[idx],
             "gt_density": density,
         }
@@ -121,6 +132,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-frequencies", type=int, default=64)
     parser.add_argument("--sigma", type=float, default=10.0)
+    parser.add_argument(
+        "--jitter-coordinates",
+        action="store_true",
+        help="Apply voxel-scale coordinate jitter for training-time sampling.",
+    )
     return parser.parse_args()
 
 
@@ -130,6 +146,7 @@ def main() -> None:
     dataset = TopologyDataset(
         dataset_path=args.dataset,
         points_per_sample=args.points_per_sample,
+        jitter_coordinates=args.jitter_coordinates,
     )
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
     batch = next(iter(dataloader))

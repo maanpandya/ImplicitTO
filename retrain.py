@@ -56,6 +56,12 @@ def main() -> None:
         "256",
         "--num-hidden-layers",
         "6",
+        "--encoding-type",
+        args.encoding_type,
+        "--num-frequencies",
+        str(args.num_frequencies),
+        "--fourier-sigma",
+        str(args.fourier_sigma),
         "--checkpoint-dir",
         args.checkpoint_dir,
         "--viz-dir",
@@ -67,6 +73,8 @@ def main() -> None:
     ]
     if args.amp:
         train_command.append("--amp")
+    if args.no_jitter_coordinates:
+        train_command.append("--no-jitter-coordinates")
 
     run(train_command)
 
@@ -92,6 +100,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--points-per-sample", type=int, default=1024)
     parser.add_argument(
+        "--encoding-type",
+        choices=("positional", "gaussian"),
+        default="positional",
+        help="Coordinate encoding used for retraining.",
+    )
+    parser.add_argument(
+        "--num-frequencies",
+        type=int,
+        default=5,
+        help="Maximum positional frequency L, or number of Gaussian Fourier features.",
+    )
+    parser.add_argument(
+        "--fourier-sigma",
+        type=float,
+        default=1.0,
+        help="Gaussian Fourier sigma; ignored by positional encoding.",
+    )
+    parser.add_argument(
         "--train-num-workers",
         type=int,
         default=0,
@@ -109,6 +135,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-data-generation",
         action="store_true",
         help="Train from an existing dataset.",
+    )
+    parser.add_argument(
+        "--no-jitter-coordinates",
+        action="store_true",
+        help="Disable training-time voxel coordinate jitter.",
     )
     args = parser.parse_args()
 

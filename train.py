@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 
 from dataset import TopologyDataset
 from model import ConditionalImplicitNetwork
@@ -27,11 +27,19 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
 
-    dataset = TopologyDataset(
+    eval_dataset = TopologyDataset(
         dataset_path=args.dataset,
         points_per_sample=args.points_per_sample,
+        jitter_coordinates=False,
     )
-    train_dataset, val_dataset = split_dataset(dataset, args.val_fraction, args.seed)
+    train_source = TopologyDataset(
+        dataset_path=args.dataset,
+        points_per_sample=args.points_per_sample,
+        jitter_coordinates=args.jitter_coordinates,
+    )
+    train_indices, val_indices = split_indices(len(eval_dataset), args.val_fraction, args.seed)
+    train_dataset = Subset(train_source, train_indices)
+    val_dataset = Subset(eval_dataset, val_indices)
 
     train_loader = DataLoader(
         train_dataset,
@@ -49,12 +57,13 @@ def main() -> None:
     )
 
     model = ConditionalImplicitNetwork(
-        cond_dim=dataset.conditions.shape[1],
+        cond_dim=eval_dataset.conditions.shape[1],
         hidden_dim=args.hidden_dim,
         num_hidden_layers=args.num_hidden_layers,
         num_frequencies=args.num_frequencies,
         fourier_sigma=args.fourier_sigma,
         activation=args.activation,
+        encoding_type=args.encoding_type,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = make_loss(args.loss)
@@ -109,7 +118,7 @@ def main() -> None:
         if epoch % args.val_every == 0:
             save_validation_figure(
                 model=model,
-                dataset=dataset,
+                dataset=eval_dataset,
                 val_dataset=val_dataset,
                 device=device,
                 epoch=epoch,
@@ -129,7 +138,7 @@ def main() -> None:
                 train_loss,
                 val_loss,
                 args,
-                dataset,
+                eval_dataset,
             )
 
 
@@ -155,9 +164,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loss", choices=("mse", "bce"), default="mse")
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--num-hidden-layers", type=int, default=6)
-    parser.add_argument("--num-frequencies", type=int, default=64)
-    parser.add_argument("--fourier-sigma", type=float, default=10.0)
+    parser.add_argument(
+        "--encoding-type",
+        choices=("positional", "gaussian"),
+        default="positional",
+        help="Coordinate encoding. Positional is bandwidth-limited for smoother super-resolution.",
+    )
+    parser.add_argument(
+        "--num-frequencies",
+        type=int,
+        default=5,
+        help="Maximum positional frequency L, or number of Gaussian Fourier features.",
+    )
+    parser.add_argument(
+        "--fourier-sigma",
+        type=float,
+        default=1.0,
+        help="Gaussian Fourier sigma; ignored by positional encoding.",
+    )
     parser.add_argument("--activation", choices=("silu", "relu", "gelu"), default="silu")
+    parser.add_argument(
+        "--no-jitter-coordinates",
+        dest="jitter_coordinates",
+        action="store_false",
+        help="Disable training-time voxel jitter.",
+    )
+    parser.set_defaults(jitter_coordinates=True)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--viz-dir", default="outputs/validation")
     parser.add_argument("--val-every", type=int, default=25)
@@ -214,13 +246,23 @@ def get_device() -> torch.device:
 def split_dataset(
     dataset: TopologyDataset, val_fraction: float, seed: int
 ) -> tuple[torch.utils.data.Subset, torch.utils.data.Subset]:
-    val_size = max(1, int(round(len(dataset) * val_fraction)))
-    train_size = len(dataset) - val_size
+    train_indices, val_indices = split_indices(len(dataset), val_fraction, seed)
+    return Subset(dataset, train_indices), Subset(dataset, val_indices)
+
+
+def split_indices(
+    dataset_size: int,
+    val_fraction: float,
+    seed: int,
+) -> tuple[list[int], list[int]]:
+    val_size = max(1, int(round(dataset_size * val_fraction)))
+    train_size = dataset_size - val_size
     if train_size <= 0:
         raise ValueError("Dataset is too small for the requested validation split")
 
     generator = torch.Generator().manual_seed(seed)
-    return random_split(dataset, [train_size, val_size], generator=generator)
+    permutation = torch.randperm(dataset_size, generator=generator).tolist()
+    return permutation[:train_size], permutation[train_size:]
 
 
 def make_loss(name: str) -> nn.Module:
