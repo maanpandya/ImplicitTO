@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib.colors import TwoSlopeNorm
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
 
 from dataset import TopologyDataset
 from eval import generate_topology, load_model, timed_generate_topology
@@ -110,7 +109,7 @@ def main() -> None:
         output_dir=output_dir,
         device=device,
     )
-    plot_super_resolution(
+    plot_dense_query(
         model,
         base_condition,
         nelx=nelx,
@@ -118,7 +117,7 @@ def main() -> None:
         output_dir=output_dir,
         device=device,
         simp_solver=simp_solver,
-        scale=args.super_res_scale,
+        scale=args.dense_query_scale,
     )
     plot_error_histogram(
         model,
@@ -142,7 +141,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--speed-cases", type=int, default=50)
     parser.add_argument("--histogram-cases", type=int, default=200)
     parser.add_argument("--inference-repeats", type=int, default=20)
-    parser.add_argument("--super-res-scale", type=int, default=4)
+    parser.add_argument("--dense-query-scale", type=int, default=4)
     parser.add_argument("--penal", type=float, default=3.0)
     parser.add_argument("--rmin", type=float, default=2.0)
     parser.add_argument("--ft", type=int, choices=(0, 1), default=1)
@@ -157,7 +156,7 @@ def parse_args() -> argparse.Namespace:
         "speed_cases",
         "histogram_cases",
         "inference_repeats",
-        "super_res_scale",
+        "dense_query_scale",
     ):
         if getattr(args, name) <= 0:
             raise ValueError(f"--{name.replace('_', '-')} must be positive")
@@ -416,7 +415,7 @@ def plot_continuous_morphing(
     save_pdf(fig, output_dir / "fig_morphing.pdf")
 
 
-def plot_super_resolution(
+def plot_dense_query(
     model: torch.nn.Module,
     sample_condition: np.ndarray,
     *,
@@ -427,13 +426,14 @@ def plot_super_resolution(
     simp_solver: Callable[[np.ndarray, int, int], tuple[np.ndarray, float, float]] | None = None,
     scale: int = 4,
 ) -> None:
-    """Show the same condition as coarse SIMP pixels and dense neural queries."""
+    """Show coarse SIMP pixels beside the learned field sampled on a denser grid."""
 
     device = device or next(model.parameters()).device
     if simp_solver is None:
         simp_solver = make_simp_solver(penal=3.0, rmin=2.0, ft=1, max_iter=200, change_tol=0.01)
 
     simp_density, _, _ = simp_solver(sample_condition, nelx, nely)
+    neural_low_density = predict_density(model, sample_condition, nelx, nely, device)
     hi_nelx = nelx * scale
     hi_nely = nely * scale
 
@@ -452,25 +452,26 @@ def plot_super_resolution(
         neural_density_tensor = model(coords, conditions).squeeze(-1)
     neural_density = neural_density_tensor.reshape(hi_nelx, hi_nely).detach().cpu().numpy()
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.75))
-    axes[0].imshow(simp_density.T, cmap="gray_r", origin="lower", vmin=0.0, vmax=1.0)
-    axes[0].set_title(f"SIMP ({nelx}x{nely})")
-    axes[1].imshow(
-        neural_density.T,
-        cmap="gray_r",
-        origin="lower",
-        vmin=0.0,
-        vmax=1.0,
-        interpolation="bilinear",
+    fig, axes = plt.subplots(1, 3, figsize=(9.2, 2.75))
+    panels = (
+        (simp_density, f"SIMP target ({nelx}x{nely})"),
+        (neural_low_density, f"Neural field ({nelx}x{nely})"),
+        (neural_density, f"Dense query ({hi_nelx}x{hi_nely})"),
     )
-    axes[1].set_title(f"Neural implicit ({hi_nelx}x{hi_nely})")
-    for ax in axes:
+    for ax, (density, title) in zip(axes, panels):
+        ax.imshow(
+            density.T,
+            cmap="gray_r",
+            origin="lower",
+            vmin=0.0,
+            vmax=1.0,
+            interpolation="nearest",
+        )
+        ax.set_title(title, fontsize=panel_axis_fontsize(title=True))
         clean_axis(ax)
 
-    add_zoom_inset(axes[0], simp_density, interpolation="nearest")
-    add_zoom_inset(axes[1], neural_density, interpolation="bilinear")
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.88, bottom=0.04, wspace=0.08)
-    save_pdf(fig, output_dir / "fig_super_res.pdf")
+    fig.subplots_adjust(left=0.015, right=0.985, top=0.86, bottom=0.04, wspace=0.08)
+    save_pdf(fig, output_dir / "fig_dense_query.pdf")
 
 
 def plot_error_histogram(
@@ -645,27 +646,6 @@ def draw_load_arrow(ax: plt.Axes, condition: np.ndarray, nelx: int, nely: int) -
         arrowprops={"arrowstyle": "-|>", "color": "#d62728", "lw": 1.6, "mutation_scale": 12},
     )
     ax.scatter([x_coord], [y_coord], s=14, c="#d62728", edgecolors="white", linewidths=0.3)
-
-
-def add_zoom_inset(ax: plt.Axes, image: np.ndarray, *, interpolation: str) -> None:
-    nelx, nely = image.shape
-    x0 = int(0.58 * nelx)
-    x1 = min(nelx, x0 + max(8, nelx // 5))
-    y0 = int(0.30 * nely)
-    y1 = min(nely, y0 + max(6, nely // 4))
-
-    inset = inset_axes(ax, width="42%", height="42%", loc="lower left", borderpad=0.9)
-    inset.imshow(
-        image[x0:x1, y0:y1].T,
-        cmap="gray_r",
-        origin="lower",
-        vmin=0.0,
-        vmax=1.0,
-        interpolation=interpolation,
-    )
-    clean_axis(inset)
-    ax.indicate_inset_zoom(inset, edgecolor="0.25", linewidth=0.8)
-    mark_inset(ax, inset, loc1=2, loc2=4, fc="none", ec="0.25", lw=0.6)
 
 
 def condition_label(condition: np.ndarray) -> str:

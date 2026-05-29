@@ -168,7 +168,7 @@ def parse_args() -> argparse.Namespace:
         "--encoding-type",
         choices=("positional", "gaussian"),
         default="positional",
-        help="Coordinate encoding. Positional is bandwidth-limited for smoother super-resolution.",
+        help="Coordinate encoding. Positional is bandwidth-limited for smoother dense field queries.",
     )
     parser.add_argument(
         "--num-frequencies",

@@ -34,7 +34,7 @@ The learned field represents density as a continuous function:
 rho = f_theta(x, y | volume fraction, load_x, load_y, Fx, Fy)
 ```
 
-This formulation has two useful consequences. First, inference is a single neural network forward pass over the design grid, so it is much faster than iterative FEA-based optimization. Second, because the network is coordinate based, the same trained model can be queried at denser coordinate grids for smooth super-resolution visualizations.
+This formulation has two useful consequences. First, inference is a single neural network forward pass over the design grid, so it is much faster than iterative FEA-based optimization. Second, because the network is coordinate based, the same trained model can be sampled on denser coordinate grids to visualize the smooth learned field. These dense queries should not be interpreted as recovering new high-frequency topology beyond what the model learned from the training grid.
 
 **Condition vector:**
 
@@ -75,7 +75,7 @@ Generated evaluation comparisons are saved in `outputs/eval/`, and paper-style f
 | `figures/fig_qualitative.pdf`  | SIMP references vs. neural predictions            |
 | `figures/fig_speed_pareto.pdf` | Inference speed and compliance comparison         |
 | `figures/fig_morphing.pdf`     | Continuous interpolation across design conditions |
-| `figures/fig_super_res.pdf`    | Higher-resolution queries of the implicit field   |
+| `figures/fig_dense_query.pdf`  | Dense sampling of the learned implicit field      |
 | `figures/fig_histogram.pdf`    | Distribution of density/compliance errors         |
 
 
