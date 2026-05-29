@@ -167,17 +167,19 @@ def parse_args() -> argparse.Namespace:
 def configure_matplotlib() -> None:
     """Use paper-friendly typography without requiring a LaTeX install."""
 
+    font_scale = 2.0
+    legend_scale = 1.5
     plt.rcParams.update(
         {
             "font.family": "serif",
             "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
-            "font.size": 9,
-            "axes.titlesize": 10,
-            "axes.labelsize": 9,
-            "legend.fontsize": 8,
-            "xtick.labelsize": 8,
-            "ytick.labelsize": 8,
-            "figure.titlesize": 12,
+            "font.size": 9 * font_scale,
+            "axes.titlesize": 10 * font_scale,
+            "axes.labelsize": 9 * font_scale,
+            "legend.fontsize": 8 * legend_scale,
+            "xtick.labelsize": 8 * font_scale,
+            "ytick.labelsize": 8 * font_scale,
+            "figure.titlesize": 12 * font_scale,
             "pdf.fonttype": 42,
             "ps.fonttype": 42,
             "savefig.dpi": 300,
@@ -522,19 +524,21 @@ def plot_error_histogram(
             color="#b2182b",
             linestyle="--",
             linewidth=1.4,
-            label=f"mean absolute = {mean_error:.1f}%",
+            label=rf"$\mu$ = {mean_error:.1f}%",
         )
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, loc="upper right")
     if clipped_count:
         ax.text(
             0.98,
-            0.94,
+            0.04,
             f"{clipped_count} outlier{'s' if clipped_count != 1 else ''} outside view",
             transform=ax.transAxes,
             ha="right",
-            va="top",
-            fontsize=7,
+            va="bottom",
+            fontsize=10.5,
             color="0.35",
+            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "0.85", "alpha": 0.92},
+            zorder=5,
         )
     ax.set_xlabel("Absolute Compliance Error (%)")
     ax.set_ylabel("Frequency")
@@ -619,12 +623,12 @@ def draw_load_arrow(ax: plt.Axes, condition: np.ndarray, nelx: int, nely: int) -
     y_coord = float(np.clip(condition[2], 0.0, 1.0) * (nely - 1))
     force = np.asarray(condition[3:5], dtype=float)
     force_norm = max(float(np.linalg.norm(force)), 1e-12)
-    arrow = force / force_norm * max(1.0, 0.18 * min(nelx, nely))
+    arrow = force / force_norm * max(1.0, 0.36 * min(nelx, nely))
     ax.annotate(
         "",
         xy=(x_coord + arrow[0], y_coord + arrow[1]),
         xytext=(x_coord, y_coord),
-        arrowprops={"arrowstyle": "-|>", "color": "#d62728", "lw": 1.6, "mutation_scale": 8},
+        arrowprops={"arrowstyle": "-|>", "color": "#d62728", "lw": 1.6, "mutation_scale": 12},
     )
     ax.scatter([x_coord], [y_coord], s=14, c="#d62728", edgecolors="white", linewidths=0.3)
 
