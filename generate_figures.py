@@ -164,6 +164,13 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def panel_axis_fontsize(*, title: bool = False) -> float:
+    """Axis/title font size for multi-panel topology figures (25% below global)."""
+
+    key = "axes.titlesize" if title else "axes.labelsize"
+    return float(plt.rcParams[key]) * 0.75
+
+
 def configure_matplotlib() -> None:
     """Use paper-friendly typography without requiring a LaTeX install."""
 
@@ -295,9 +302,13 @@ def plot_qualitative_matrix(
                     norm=TwoSlopeNorm(vmin=-1.0, vcenter=0.0, vmax=1.0),
                 )
             if row == 0:
-                ax.set_title(title)
+                ax.set_title(title, fontsize=panel_axis_fontsize(title=True))
             if col == 0:
-                ax.set_ylabel(condition_label(condition), labelpad=2)
+                ax.set_ylabel(
+                    condition_label(condition),
+                    labelpad=2,
+                    fontsize=panel_axis_fontsize(),
+                )
             clean_axis(ax)
 
     fig.tight_layout(pad=0.35)
@@ -381,7 +392,7 @@ def plot_continuous_morphing(
         density = predict_density(model, condition, nelx, nely, device)
         axes[0, col].imshow(density.T, cmap="gray_r", origin="lower", vmin=0.0, vmax=1.0)
         draw_load_arrow(axes[0, col], condition, nelx, nely)
-        axes[0, col].set_title(rf"$v={volfrac:.2f}$")
+        axes[0, col].set_title(rf"$v={volfrac:.2f}$", fontsize=panel_axis_fontsize(title=True))
         clean_axis(axes[0, col])
 
     angles = np.linspace(0.0, np.pi / 2.0, 5)
@@ -393,11 +404,14 @@ def plot_continuous_morphing(
         density = predict_density(model, condition, nelx, nely, device)
         axes[1, col].imshow(density.T, cmap="gray_r", origin="lower", vmin=0.0, vmax=1.0)
         draw_load_arrow(axes[1, col], condition, nelx, nely)
-        axes[1, col].set_title(rf"$\theta={np.degrees(angle):.0f}^\circ$")
+        axes[1, col].set_title(
+            rf"$\theta={np.degrees(angle):.0f}^\circ$",
+            fontsize=panel_axis_fontsize(title=True),
+        )
         clean_axis(axes[1, col])
 
-    axes[0, 0].set_ylabel("Volume sweep")
-    axes[1, 0].set_ylabel("Angle sweep")
+    axes[0, 0].set_ylabel("Volume sweep", fontsize=panel_axis_fontsize())
+    axes[1, 0].set_ylabel("Angle sweep", fontsize=panel_axis_fontsize())
     fig.tight_layout(pad=0.25)
     save_pdf(fig, output_dir / "fig_morphing.pdf")
 
