@@ -1,9 +1,5 @@
 # Amortized 2D Topology Optimization via Conditional Neural Implicit Fields
 
-Python
-PyTorch
-Status
-
 This repository implements an amortized surrogate for 2D density-based topology optimization. Instead of solving a new SIMP problem from scratch for each load case, the trained neural implicit field maps a design condition and spatial coordinate directly to material density, producing a full topology in milliseconds.
 
 > **Note:** This project is currently an unpublished AA222 final project. The repository is written in a paper-style format for reproducibility, but there is not yet a formal publication or BibTeX citation.
